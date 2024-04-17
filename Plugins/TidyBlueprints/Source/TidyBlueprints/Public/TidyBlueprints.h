@@ -14,12 +14,7 @@ public:
 	virtual void ShutdownModule() override;
 
 	/**
-	 * Adds a menu item to the function call nodes
+	 * Adds a menu item to each specified node in the blueprint editor
 	 */
-	void RegisterFunctionNodeMenuItem();
-
-	/**
-	 * Adds a menu item to the get and set variable nodes
-	 */
-	void RegisterVariableNodeMenuItem();
+	void RegisterNodeMenuItem();
 };
