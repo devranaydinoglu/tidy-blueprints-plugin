@@ -9,27 +9,17 @@
 class UEdGraphNode;
 class FBlueprintEditor;
 
-class UTBPin
-{
-	// Name of the pin as seen on the node
-	FName PinName;
-
-	// Data type of the pin
-	FName PinType;
-
-	// Direction of the pin on the node (input or output)
-	TEnumAsByte<enum EEdGraphPinDirection> PinDirection;
-
-	// Node which owns this pin
-	TStrongObjectPtr<UEdGraphNode> OwningNode;
-};
-
 class TBNode
 {
 public:
 	TStrongObjectPtr<UEdGraphNode> Node;
 	int32 NodeHeight;
 	int32 NodeWidth;
+
+public:
+	TBNode()
+		: NodeHeight(0), NodeWidth(0)
+	{}
 };
 
 /**
@@ -49,6 +39,11 @@ public:
 
 	// Output nodes ordered by X and Y positions on the graph
 	TArray<TBNode> OutputNodes;
+
+public:
+	TBCollection()
+		: Index(-1)
+	{}
 };
 
 /**
@@ -62,6 +57,17 @@ public:
 	TBNode StartingNode;
 
 	TArray<TBCollection> Collections;
+
+public:
+	TBCollection* FindCollection(const UEdGraphNode* Node)
+	{
+		for (TBCollection& Collection : Collections)
+		{
+			if (Collection.ParentNode.Node.Get()->GetUniqueID() == Node->GetUniqueID()) return &Collection;
+		}
+
+		return nullptr;
+	}
 };
 
 UCLASS()
@@ -70,24 +76,20 @@ class TIDYBLUEPRINTS_API UTBManagerSubsystem : public UEditorSubsystem
 	GENERATED_BODY()
 
 private:
-	FBlueprintEditor* CurrentBlueprintEditor = nullptr;
+	FBlueprintEditor* BlueprintEditor = nullptr;
 
+	FGraphPanelSelectionSet SelectedNodes;
 public:
 
 	/**
 	 * Gets the current blueprint editor.
 	 */
-	FBlueprintEditor* GetCurrentBlueprintEditor();
-
-	/**
-	 * Gets the current graph.
-	 */
-	UEdGraph* GetCurrentGraph();
+	void SetBlueprintEditor();
 
 	/**
 	 * Gets all the selected nodes in the current graph.
 	 */
-	FGraphPanelSelectionSet GetSelectedNodes();
+	void SetSelectedNodes();
 
 	/**
 	 * Entry point, called when Tidy Up button is clicked.
@@ -95,8 +97,24 @@ public:
 	void StartTidyUp();
 
 private:
+	/**
+	 * Recursively traverse the execution sequence starting from the specified node.
+	 *
+	 * @param Node Starting point
+	 * @param CollectionIndex Index to give each collection in the cluster an index based on the execution order
+	 * @param SelectedNodes Selected nodes in the graph
+	 * @param Cluster Cluster to traverse
+	 */
+	void TraverseSequence(UEdGraphNode* Node, int32& CollectionIndex, TBCluster& Cluster);
 
-	void RecursivelyGetChildNodes(UEdGraphNode* Node, UEdGraphPin* InLinkedPin, TBCollection& Collection);
+	/**
+	 * Recursively get all child nodes of a node
+	 *
+	 * @param Node Node to get the child of
+	 * @param InLinkedPin Pin which the node is linked to
+	 * @param Collection Collection to add the node to
+	 */
+	void GetChildNodes(UEdGraphNode* Node, UEdGraphPin* InLinkedPin, TBCollection& Collection);
 
 	TBNode PopulateNodeData(UEdGraphNode* Node);
 
@@ -104,7 +122,7 @@ private:
 	 * Checks whether the node is the first node in the selected nodes' execution sequence.
 	 * @return Is first in sequence
 	 */
-	bool IsNodeFirstInSequence(const UEdGraphNode* Node, FGraphPanelSelectionSet SelectedNodes);
+	bool IsNodeFirstInSequence(const UEdGraphNode* Node);
 
 	/**
 	 * Checks whether the node is executable by checking its pins.
@@ -120,5 +138,7 @@ private:
 	 * @param NewPosition New coordinates of the node on the blueprint graph
 	 */
 	void SetNodePosition(UEdGraph* Graph, UEdGraphNode* Node, const FVector2D& NewPosition);
+
+
 
 };

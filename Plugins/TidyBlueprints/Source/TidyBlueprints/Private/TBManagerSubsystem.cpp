@@ -6,7 +6,7 @@
 #include "SNodePanel.h"
 #include "Widgets/Docking/SDockTab.h"
 
-FBlueprintEditor* UTBManagerSubsystem::GetCurrentBlueprintEditor()
+void UTBManagerSubsystem::SetBlueprintEditor()
 {
 	TArray<UObject*> EditedAssets = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->GetAllEditedAssets();
 	
@@ -18,32 +18,23 @@ FBlueprintEditor* UTBManagerSubsystem::GetCurrentBlueprintEditor()
 		TSharedPtr<SDockTab> Tab = AssetEditorToolkit->GetTabManager()->GetOwnerTab();
 		if (Tab->IsForeground())
 		{
-			FBlueprintEditor* BlueprintEditor = static_cast<FBlueprintEditor*>(AssetEditorToolkit);
-			return BlueprintEditor;
+			BlueprintEditor = static_cast<FBlueprintEditor*>(AssetEditorToolkit);
 		}
 	}
-
-	return nullptr;
 }
 
-UEdGraph* UTBManagerSubsystem::GetCurrentGraph()
+void UTBManagerSubsystem::SetSelectedNodes()
 {
-	return GetCurrentBlueprintEditor()->GetFocusedGraph();
-}
-
-FGraphPanelSelectionSet UTBManagerSubsystem::GetSelectedNodes()
-{
-	CurrentBlueprintEditor = GetCurrentBlueprintEditor();
-	return CurrentBlueprintEditor->GetSelectedNodes();
+	SelectedNodes = BlueprintEditor->GetSelectedNodes();
 }
 
 void UTBManagerSubsystem::StartTidyUp()
 {
-	FGraphPanelSelectionSet SelectedNodes = GetSelectedNodes();
-	TBCluster Cluster;
-	int32 CollectionIndex = 0;
+	SetBlueprintEditor();
+	SetSelectedNodes();
 
-	// TODO: fix collection index out of order (after getting first node in sequence, we should follow its ouput exec pin
+	TBCluster Cluster;
+
 	for (UObject* NodeObj : SelectedNodes)
 	{
 		UEdGraphNode* Node = Cast<UEdGraphNode>(NodeObj);
@@ -53,7 +44,6 @@ void UTBManagerSubsystem::StartTidyUp()
 		if (IsNodeExecutable(Node))
 		{
 			TBCollection Collection;
-			Collection.Index = CollectionIndex;
 			Collection.ParentNode = NodeData;
 
 			// Get all non-executable nodes linked to the parent node
@@ -65,22 +55,26 @@ void UTBManagerSubsystem::StartTidyUp()
 					{
 						if (Pin->Direction == EGPD_Input) Collection.InputNodes.Add(PopulateNodeData(LinkedPin->GetOwningNode()));
 						else if (Pin->Direction == EGPD_Output) Collection.OutputNodes.Add(PopulateNodeData(LinkedPin->GetOwningNode()));
-						RecursivelyGetChildNodes(LinkedPin->GetOwningNode(), LinkedPin, Collection);
+						GetChildNodes(LinkedPin->GetOwningNode(), LinkedPin, Collection);
 					}
 				}
 			}
 
 			Cluster.Collections.Add(Collection);
-			CollectionIndex++;
 		}
 
-		if (IsNodeFirstInSequence(Node, SelectedNodes))
+		if (IsNodeFirstInSequence(Node))
 		{
 			Cluster.StartingNode = PopulateNodeData(Node);
+			//break;
 		}
 	}
 
-	UE_LOG(LogTemp, Error, TEXT("Cluster starting node: %s"), *Cluster.StartingNode.Node.Get()->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+	int32 CollectionIndex = 0;
+	TraverseSequence(Cluster.StartingNode.Node.Get(), CollectionIndex, Cluster);
+
+	if (Cluster.StartingNode.Node.IsValid())
+		UE_LOG(LogTemp, Error, TEXT("Cluster starting node: %s"), *Cluster.StartingNode.Node.Get()->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
 
 	for (int32 i = 0; i < Cluster.Collections.Num(); i++)
 	{
@@ -91,24 +85,83 @@ void UTBManagerSubsystem::StartTidyUp()
 		{
 			UE_LOG(LogTemp, Display, TEXT("Collection input node: %s"), *Cluster.Collections[i].InputNodes[j].Node.Get()->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
 		}
-	}
 
+		for (int32 j = 0; j < Cluster.Collections[i].OutputNodes.Num(); j++)
+		{
+			UE_LOG(LogTemp, Display, TEXT("Collection output node: %s"), *Cluster.Collections[i].InputNodes[j].Node.Get()->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+		}
+	}
 }
 
-void UTBManagerSubsystem::RecursivelyGetChildNodes(UEdGraphNode* Node, UEdGraphPin* InLinkedPin, TBCollection& Collection)
+void UTBManagerSubsystem::TraverseSequence(UEdGraphNode* Node, int32& CollectionIndex, TBCluster& Cluster)
+{
+	if (!SelectedNodes.Contains(Node)) return;
+
+	TBCollection* Collection = Cluster.FindCollection(Node);
+	if (Collection->Index == -1) Collection->Index = CollectionIndex++;
+
+	for (const UEdGraphPin* Pin : Node->Pins)
+	{
+		if (Pin->Direction == EGPD_Output && Pin->PinType.PinCategory == "exec")
+		{
+			for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+			{
+				TraverseSequence(LinkedPin->GetOwningNode(), CollectionIndex, Cluster);
+			}
+		}
+	}
+
+	//TBCollection Collection;
+	//if (Collection.Index == -1) Collection.Index = ++CollectionIndex;
+	//Collection.ParentNode = PopulateNodeData(Node);
+
+	//for (const UEdGraphPin* Pin : Node->Pins)
+	//{
+	//	if (Pin->PinType.PinCategory == "exec" && Pin->Direction == EGPD_Input) continue; // Skip the exec input pin which we traced to get to this node
+
+	//	if (Pin->PinType.PinCategory == "exec")
+	//	{
+	//		for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+	//		{
+
+	//			TraverseSequence(LinkedPin->GetOwningNode(), CollectionIndex, SelectedNodes, Cluster);
+	//		}
+	//	}
+	//	else
+	//	{
+	//		for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+	//		{
+	//			GetChildNodes(Node, LinkedPin, Collection);
+	//		}
+	//	}
+	//}
+
+	//Cluster.Collections.Add(Collection);
+}
+
+void UTBManagerSubsystem::GetChildNodes(UEdGraphNode* Node, UEdGraphPin* InLinkedPin, TBCollection& Collection)
 {
 	if (Node->Pins.Num() < 2) return;
 
 	for (UEdGraphPin* Pin : Node->Pins)
 	{
-		if (Pin->PinType.PinCategory != "exec" && Pin != InLinkedPin)
+		if (Pin->PinType.PinCategory != "exec")
 		{
-			for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+			if (Pin != InLinkedPin)
 			{
-				if (Pin->Direction == EGPD_Input) Collection.InputNodes.Add(PopulateNodeData(LinkedPin->GetOwningNode()));
-				else if (Pin->Direction == EGPD_Output) Collection.OutputNodes.Add(PopulateNodeData(LinkedPin->GetOwningNode()));
+				for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+				{
+					if (Pin->Direction == EGPD_Input)
+					{
+						Collection.InputNodes.Add(PopulateNodeData(LinkedPin->GetOwningNode()));
+					}
+					else if (Pin->Direction == EGPD_Output)
+					{
+						Collection.OutputNodes.Add(PopulateNodeData(LinkedPin->GetOwningNode()));
+					}
 
-				RecursivelyGetChildNodes(LinkedPin->GetOwningNode(), LinkedPin, Collection);
+					GetChildNodes(LinkedPin->GetOwningNode(), LinkedPin, Collection);
+				}
 			}
 		}
 	}
@@ -120,7 +173,7 @@ TBNode UTBManagerSubsystem::PopulateNodeData(UEdGraphNode* Node)
 	NodeData.Node = TStrongObjectPtr(Node);
 	FVector2D NodeSize = FVector2D(Node->NodeWidth, Node->NodeHeight);
 
-	TSharedPtr<SGraphEditor> GraphEditor = GetCurrentBlueprintEditor()->OpenGraphAndBringToFront(GetCurrentGraph());
+	TSharedPtr<SGraphEditor> GraphEditor = BlueprintEditor->OpenGraphAndBringToFront(BlueprintEditor->GetFocusedGraph());
 	FSlateRect Rect;
 	if (GraphEditor->GetBoundsForNode(Node, Rect, 0.f))
 	{
@@ -133,7 +186,7 @@ TBNode UTBManagerSubsystem::PopulateNodeData(UEdGraphNode* Node)
 	return NodeData;
 }
 
-bool UTBManagerSubsystem::IsNodeFirstInSequence(const UEdGraphNode* Node, FGraphPanelSelectionSet SelectedNodes)
+bool UTBManagerSubsystem::IsNodeFirstInSequence(const UEdGraphNode* Node)
 {
 	int32 NumExecutePins = 0;
 	for (const UEdGraphPin* ExecPin : Node->Pins)
