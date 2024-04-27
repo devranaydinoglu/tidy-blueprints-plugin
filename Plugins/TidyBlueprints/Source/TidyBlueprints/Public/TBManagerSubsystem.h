@@ -13,12 +13,11 @@ class TBNode
 {
 public:
 	TStrongObjectPtr<UEdGraphNode> Node;
-	int32 NodeHeight;
-	int32 NodeWidth;
+	FVector2D Size;
 
 public:
 	TBNode()
-		: NodeHeight(0), NodeWidth(0)
+		: Size(FVector2D::ZeroVector)
 	{}
 };
 
@@ -40,10 +39,15 @@ public:
 	// Output nodes ordered by X and Y positions on the graph
 	TArray<TBNode> OutputNodes;
 
+	// Padding applied to the edges of the collection
+	int32 Padding;
+
 public:
 	TBCollection()
-		: Index(-1)
+		: Index(-1), Padding(0)
 	{}
+
+	int32 CalculatePadding();
 };
 
 /**
@@ -70,6 +74,12 @@ public:
 	}
 };
 
+enum class CollectionLayoutType
+{
+	STACKED,
+	LIST
+};
+
 UCLASS()
 class TIDYBLUEPRINTS_API UTBManagerSubsystem : public UEditorSubsystem
 {
@@ -79,17 +89,14 @@ private:
 	FBlueprintEditor* BlueprintEditor = nullptr;
 
 	FGraphPanelSelectionSet SelectedNodes;
+
+	// Config properties
+	CollectionLayoutType CollectionLayoutType = CollectionLayoutType::STACKED;
+
+	int32 CollectionNodesPaddingX = 3;
+	int32 CollectionNodesPaddingY = 6;
+
 public:
-
-	/**
-	 * Gets the current blueprint editor.
-	 */
-	void SetBlueprintEditor();
-
-	/**
-	 * Gets all the selected nodes in the current graph.
-	 */
-	void SetSelectedNodes();
 
 	/**
 	 * Entry point, called when Tidy Up button is clicked.
@@ -137,8 +144,49 @@ private:
 	 * @param Node Node whose position should be updated
 	 * @param NewPosition New coordinates of the node on the blueprint graph
 	 */
-	void SetNodePosition(UEdGraph* Graph, UEdGraphNode* Node, const FVector2D& NewPosition);
+	void SetNodePosition(UEdGraphNode* Node, const FVector2D& NewPosition);
 
+	/**
+	 * Sets the positions of the nodes of a collection on the blueprint graph.
+	 */
+	void SetCollectionNodePositions(const TBCluster& Cluster);
 
+	/**
+	 * Gets the current blueprint editor.
+	 */
+	void SetBlueprintEditor();
 
+	/**
+	 * Gets the graph editor based on the active top level window
+	 *
+	 * @return 
+	 */
+	TSharedPtr<SGraphEditor> GetCurrentGraphEditor();
+
+	/**
+	 * Gets the current graph panel from the current blueprint editor.
+	 */
+	SGraphPanel* GetCurrentGraphPanel();
+
+	/**
+	 * Gets all the selected nodes in the current graph.
+	 */
+	void SetSelectedNodes();
+
+	/**
+	 * Gets the slate widget of a graph node.
+	 *
+	 * @return Slate widget
+	 */
+	SGraphNode* GetNodeWidget(const UEdGraphNode* Node);
+
+	/**
+	 * Gets the offset of a pin in relation to its owning node.
+	 *
+	 * @param Node Owning node
+	 * @return Pin offset
+	 */
+	FVector2D GetPinOffset(const UEdGraphPin* Pin);
+
+	FVector2D GetExecutableNodeTargetPosition(const TBNode& Node);
 };
